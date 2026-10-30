@@ -1,9 +1,11 @@
+
 name: Docker Installer Download
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '00 23 * * *'
+    # 每周五 UTC 23:00（北京时间/新加坡时间周六 07:00）
+    - cron: '0 23 * * 5'
 
 permissions:
   contents: write
@@ -13,28 +15,92 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Download installers
-      run: |
-         curl -o linux.sh "https://get.docker.com"
-         curl -o docker_desktop_installer_windows_x86_64.exe "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
-         curl -o docker_desktop_installer_windows_arm64.exe "https://desktop.docker.com/win/main/arm64/Docker%20Desktop%20Installer.exe"
-         curl -o docker_desktop_installer_mac_arm64.dmg "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
-         curl -o docker_desktop_installer_mac_x84_64.dmg "https://desktop.docker.com/mac/main/amd64/Docker.dmg"
-         curl -o docker_desktop_installer_linux_debian_x84_64.dmg "https://desktop.docker.com/linux/main/amd64/149282/docker-desktop-4.30.0-amd64.deb"
-         curl -o docker_desktop_installer_linux_fedora_x84_64.dmg "https://desktop.docker.com/linux/main/amd64/149282/docker-desktop-4.30.0-x86_64.rpm"
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-    - name: Release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          linux.sh
-          docker_desktop_installer_windows_x86_64.exe
-          docker_desktop_installer_windows_arm64.exe
-          docker_desktop_installer_mac_arm64.dmg
-          docker_desktop_installer_mac_x84_64.dmg
-          docker_desktop_installer_linux_debian_x84_64.dmg
-          docker_desktop_installer_linux_fedora_x84_64.dmg
-        tag_name: latest
+      - name: Install dependencies
+        run: python -m pip install beautifulsoup4
+
+      - name: Resolve latest version and download installers
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p downloads
+          cd downloads
+
+          # 获取 Docker 官方最新 Release Notes
+          python - <<'PY'
+          import re
+          import json
+          import urllib.request
+          from bs4 import BeautifulSoup
+
+          page = "https://docs.docker.com/desktop/release-notes/"
+
+          req = urllib.request.Request(
+              page,
+              headers={"User-Agent": "Mozilla/5.0"}
+          )
+
+          with urllib.request.urlopen(req, timeout=30) as response:
+              html = response.read()
+
+          soup = BeautifulSoup(html, "html.parser")
+
+      # 第一步：创建独立版本 Release，保留历史版本
+      - name: Publish Versioned Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.version }}
+          name: Docker Installers v${{ env.version }}
+          body: |
+            Docker Desktop Version: ${{ env.version }}
+
+            Official Docker installers.
+
+            SHA256SUMS is included for file verification.
+          files: |
+            downloads/linux.sh
+            downloads/docker_desktop_installer_windows_x86_64.exe
+            downloads/docker_desktop_installer_windows_arm64.exe
+            downloads/docker_desktop_installer_mac_arm64.dmg
+            downloads/docker_desktop_installer_mac_x86_64.dmg
+            downloads/docker_desktop_installer_linux_amd64.deb
+            downloads/docker_desktop_installer_linux_x86_64.rpm
+            downloads/SHA256SUMS
+          overwrite_files: true
+          prerelease: false
+          make_latest: false
+
+      # 第二步：更新 latest Release，始终指向当前最新版
+      - name: Update Latest Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Docker Installers (Latest)
+          body: |
+            Latest Docker Desktop Version: ${{ env.version }}
+
+            Automatically updated from official Docker sources.
+
+            Historical versions are available in other Releases.
+
+            SHA256SUMS is included for file verification.
+          files: |
+            downloads/linux.sh
+            downloads/docker_desktop_installer_windows_x86_64.exe
+            downloads/docker_desktop_installer_windows_arm64.exe
+            downloads/docker_desktop_installer_mac_arm64.dmg
+            downloads/docker_desktop_installer_mac_x86_64.dmg
+            downloads/docker_desktop_installer_linux_amd64.deb
+            downloads/docker_desktop_installer_linux_x86_64.rpm
+            downloads/SHA256SUMS
+          overwrite_files: true
+          prerelease: false
+          make_latest: true
